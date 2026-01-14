@@ -15,9 +15,6 @@ import redshift_utils
 # --- Constants & IDs ---
 PLUGIN_ID = 1067298
 
-# Node IDs
-
-
 # Dialog IDs
 GRP_MAIN = 1000
 GRP_TRANSFORM = 1001
@@ -29,12 +26,12 @@ CHK_OFFSET = 1006
 CHK_ROTATION = 1007
 CHK_TRIPLANAR = 1008
 CHK_PER_TEXTURE = 1009
+CHK_UV_PROJECTION = 1014 # New ID
 
 RAD_ABS = 1010
 RAD_VEC_ABS = 1011
 BTN_APPLY = 1012
 BTN_CLOSE = 1013
-
 
 # Helper Functions
 def get_port(node, port_id_string):
@@ -44,7 +41,6 @@ def get_port(node, port_id_string):
         outputs = node.GetOutputs()
         port = outputs.FindChild(port_id_string)
     return port
-
 
 def create_control_nodes(graph, params):
     scale_node = None
@@ -61,13 +57,14 @@ def create_control_nodes(graph, params):
 
         if scale_node: 
             new_nodes.append(scale_node)
-            scale_node.SetValue("net.maxon.node.base.name", "Scale Abs")
-            if params["scale_type_vector"]:
+            if params["scale_type_vector"]: # Vector Abs
                 scale_in = scale_node.GetInputs().FindChild(redshift_utils.PORT_RS_MATH_ABS_VECTOR_INPUT)
-                scale_in.SetDefaultValue(maxon.Vector(1, 1, 1))
-            else:
+                scale_in.SetPortValue(maxon.Vector(1, 1, 1))
+                scale_node.SetValue("net.maxon.node.base.name", "Vector Scale Abs")
+            else: # Abs
                 scale_in = scale_node.GetInputs().FindChild(redshift_utils.PORT_RS_MATH_ABS_INPUT)
-                scale_in.SetDefaultValue(1.0)
+                scale_in.SetPortValue(1.0)
+                scale_node.SetValue("net.maxon.node.base.name", "Scale Abs")
 
     # Offset Abs 노드 생성
     if params["offset"]:
@@ -89,18 +86,29 @@ def create_control_nodes(graph, params):
             
     return scale_node, offset_node, rotate_node, new_nodes
 
+def create_uv_projection_node(graph, params):
+    uv_node = graph.AddChild(maxon.Id(), redshift_utils.ID_RS_UV_CONTEXT_PROJECTION)
+    uv_node.SetValue("net.maxon.node.base.name", "UV Context Projection")
+    
+    if params["triplanar"]:
+        proj_type_port = uv_node.GetInputs().FindChild(redshift_utils.PORT_RS_UV_CONTEXT_PROJECTION_PROJECTION)
+        if proj_type_port.IsValid():
+            proj_type_port.SetPortValue(2) # 002 Triplanar
+
+    return uv_node
+
 def validate_selection(doc):
     c4d.CallCommand(465002328) # Node Editor
     mat = doc.GetActiveMaterial()
     if not mat:
-        c4d.gui.MessageDialog("노드 에디터 창을 열고 텍스처 노드를 선택하세요.")
+        c4d.gui.MessageDialog("Please select a Texture node in the Node Editor.")
         return None, None
 
     nodeMaterial = mat.GetNodeMaterialReference()
     redshiftNodeSpaceId = maxon.Id("com.redshift3d.redshift4c4d.class.nodespace")
     
     if not nodeMaterial.HasSpace(redshiftNodeSpaceId):
-        c4d.gui.MessageDialog("선택한 머티리얼이 레드쉬프트 노드 머티리얼이 아닙니다.")
+        c4d.gui.MessageDialog("Please select a Redshift Node Material.")
         return None, None
 
     graph = nodeMaterial.GetGraph(redshiftNodeSpaceId)
@@ -110,10 +118,6 @@ def validate_selection(doc):
     selected_nodes = []
     maxon.GraphModelHelper.GetSelectedNodes(graph, maxon.NODE_KIND.NODE, lambda node: selected_nodes.append(node) or True)
 
-    if not selected_nodes:
-        c4d.gui.MessageDialog("한 개 이상의 텍스쳐 노드를 선택해주세요.")
-        return None, None
-
     texture_nodes = []
     for node in selected_nodes:
         asset_id = node.GetValue("net.maxon.node.attribute.assetid")[0]
@@ -121,7 +125,7 @@ def validate_selection(doc):
             texture_nodes.append(node)
 
     if not texture_nodes:
-        c4d.gui.MessageDialog("한 개 이상의 텍스쳐 노드를 선택해주세요.")
+        c4d.gui.MessageDialog("Please select at least one Texture node.")
         return None, None
         
     return graph, texture_nodes
@@ -133,19 +137,36 @@ def apply_texture_controls(graph, texture_nodes, params):
         common_scale_node = None
         common_offset_node = None
         common_rotate_node = None
+        common_uv_node = None
         
         if not params["per_texture"]:
-            common_scale_node, common_offset_node, common_rotate_node, new_nodes = create_control_nodes(graph, params)
-            created_nodes.extend(new_nodes)
+            if params["uv_projection"]:
+                common_uv_node = create_uv_projection_node(graph, params)
+                created_nodes.append(common_uv_node)
+            else:
+                common_scale_node, common_offset_node, common_rotate_node, new_nodes = create_control_nodes(graph, params)
+                created_nodes.extend(new_nodes)
         
         for tex_node in texture_nodes:
+            uv_node = None
+            scale_node = None
+            offset_node = None
+            rotate_node = None
+
             if params["per_texture"]:
-                scale_node, offset_node, rotate_node, new_nodes = create_control_nodes(graph, params)
-                created_nodes.extend(new_nodes)
+                if params["uv_projection"]:
+                    uv_node = create_uv_projection_node(graph, params)
+                    created_nodes.append(uv_node)
+                else:
+                    scale_node, offset_node, rotate_node, new_nodes = create_control_nodes(graph, params)
+                    created_nodes.extend(new_nodes)
             else:
-                scale_node = common_scale_node
-                offset_node = common_offset_node
-                rotate_node = common_rotate_node
+                if params["uv_projection"]:
+                    uv_node = common_uv_node
+                else:
+                    scale_node = common_scale_node
+                    offset_node = common_offset_node
+                    rotate_node = common_rotate_node
             
             def get_node_output(node):
                 if not node or not node.IsValid(): return None
@@ -156,7 +177,19 @@ def apply_texture_controls(graph, texture_nodes, params):
                     return node.GetOutputs().FindChild(redshift_utils.PORT_RS_MATH_ABS_VECTOR_OUT)
                 return None
 
-            if params["triplanar"]:
+            if params["uv_projection"]:
+                 if uv_node:
+                    uv_out = uv_node.GetOutputs().FindChild(redshift_utils.PORT_RS_UV_CONTEXT_PROJECTION_OUTCONTEXT)
+                    tex_uv_in = tex_node.GetInputs().FindChild(redshift_utils.PORT_RS_TEX_UV_CONTEXT)
+                    
+                    if uv_out.IsValid() and tex_uv_in.IsValid():
+                        redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_UV_CONTEXT)
+                        redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_SCALE)
+                        redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_OFFSET)
+                        redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_ROTATE)
+                        uv_out.Connect(tex_uv_in)
+
+            elif params["triplanar"]:
                 tex_out_port = tex_node.GetOutputs().FindChild(redshift_utils.PORT_RS_TEX_OUTCOLOR)
                 connections = []
                 if tex_out_port.IsValid():
@@ -201,6 +234,7 @@ def apply_texture_controls(graph, texture_nodes, params):
                     tex_scale = tex_node.GetInputs().FindChild(redshift_utils.PORT_RS_TEX_SCALE)
                     if scale_out and scale_out.IsValid() and tex_scale.IsValid():
                         redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_SCALE)
+                        redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_UV_CONTEXT)
                         scale_out.Connect(tex_scale)
                         
                 if offset_node:
@@ -208,6 +242,7 @@ def apply_texture_controls(graph, texture_nodes, params):
                     tex_offset = tex_node.GetInputs().FindChild(redshift_utils.PORT_RS_TEX_OFFSET)
                     if offset_out and offset_out.IsValid() and tex_offset.IsValid():
                         redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_OFFSET)
+                        redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_UV_CONTEXT)
                         offset_out.Connect(tex_offset)
                         
                 if rotate_node:
@@ -215,6 +250,7 @@ def apply_texture_controls(graph, texture_nodes, params):
                     tex_rotate = tex_node.GetInputs().FindChild(redshift_utils.PORT_RS_TEX_ROTATE)
                     if rotate_out and rotate_out.IsValid() and tex_rotate.IsValid():
                         redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_ROTATE)
+                        redshift_utils.remove_connections(tex_node, redshift_utils.PORT_RS_TEX_UV_CONTEXT)
                         rotate_out.Connect(tex_rotate)
 
         for node in created_nodes:
@@ -231,6 +267,7 @@ def apply_texture_controls(graph, texture_nodes, params):
 class TextureTransformDialog(c4d.gui.GeDialog):
     def __init__(self):
         self.params = {
+            "uv_projection": False,
             "scale": True,
             "offset": False,
             "rotation": False,
@@ -238,7 +275,7 @@ class TextureTransformDialog(c4d.gui.GeDialog):
             "scale_type_vector": False,
             "per_texture": False
         }
-        self.settings_file = os.path.join(os.path.dirname(__file__), "mw_settings.json")
+        self.settings_file = os.path.join(os.path.dirname(__file__), "utils", "settings.json")
 
     def load_settings(self):
         if not os.path.exists(self.settings_file):
@@ -277,6 +314,10 @@ class TextureTransformDialog(c4d.gui.GeDialog):
         self.GroupBegin(GRP_MAIN, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, 1, 0, "Controls", 0)
         self.GroupBorderSpace(10, 5, 10, 5)
 
+        self.AddCheckbox(CHK_UV_PROJECTION, c4d.BFH_LEFT, 0, 0, "Use UV Context Projection(2026.1)")
+
+        self.AddSeparatorH(c4d.BFH_SCALEFIT)
+
         self.AddCheckbox(CHK_SCALE, c4d.BFH_LEFT, 0, 0, "Scale")
         
         self.GroupBegin(GRP_SCALE_TYPE, c4d.BFH_SCALEFIT | c4d.BFV_TOP, 2, 0, "Scale Type", 0)
@@ -292,7 +333,7 @@ class TextureTransformDialog(c4d.gui.GeDialog):
         self.AddSeparatorH(c4d.BFH_SCALEFIT)
         
         self.AddCheckbox(CHK_TRIPLANAR, c4d.BFH_LEFT | c4d.BFV_TOP, 0, 0, "Use Triplanar")
-        self.AddCheckbox(CHK_PER_TEXTURE, c4d.BFH_LEFT | c4d.BFV_TOP, 0, 0, "Create Abs per Texture")
+        self.AddCheckbox(CHK_PER_TEXTURE, c4d.BFH_LEFT | c4d.BFV_TOP, 0, 0, "Create Node per Texture")
         
         if self.GroupBegin(0, c4d.BFH_CENTER, 2, 0, "", 0):
             self.GroupBorderSpace(0, 10, 0, 0)
@@ -306,32 +347,56 @@ class TextureTransformDialog(c4d.gui.GeDialog):
     def InitValues(self):
         self.load_settings()
 
+        self.SetBool(CHK_UV_PROJECTION, self.params["uv_projection"])
         self.SetBool(CHK_SCALE, self.params["scale"])
         self.SetBool(CHK_OFFSET, self.params["offset"])
         self.SetBool(CHK_ROTATION, self.params["rotation"])
         self.SetBool(CHK_TRIPLANAR, self.params["triplanar"])
         self.SetBool(CHK_PER_TEXTURE, self.params["per_texture"])
+
+        # Enable/Disable logic based on initial values
+        is_uv = self.params["uv_projection"]
+        self.Enable(CHK_SCALE, not is_uv)
+        self.Enable(CHK_OFFSET, not is_uv)
+        self.Enable(CHK_ROTATION, not is_uv)
+        self.Enable(GRP_RADIO_SCALE_TYPE, not is_uv)
         
+        # Scale Type logic
         if self.params["scale_type_vector"]:
             self.SetInt32(GRP_RADIO_SCALE_TYPE, RAD_VEC_ABS)
         else:
             self.SetInt32(GRP_RADIO_SCALE_TYPE, RAD_ABS)
             
-        self.Enable(RAD_ABS, self.params["scale"])
-        self.Enable(RAD_VEC_ABS, self.params["scale"])
+        self.Enable(RAD_ABS, self.params["scale"] and not is_uv)
+        self.Enable(RAD_VEC_ABS, self.params["scale"] and not is_uv)
         
         return True
 
     def Command(self, id, msg):
+        if id == CHK_UV_PROJECTION:
+            is_uv = self.GetBool(CHK_UV_PROJECTION)
+            self.Enable(CHK_SCALE, not is_uv)
+            self.Enable(CHK_OFFSET, not is_uv)
+            self.Enable(CHK_ROTATION, not is_uv)
+            self.Enable(GRP_RADIO_SCALE_TYPE, not is_uv)
+            
+            # Re-evaluate scale enable state
+            if not is_uv:
+                 self.Enable(RAD_ABS, self.GetBool(CHK_SCALE))
+                 self.Enable(RAD_VEC_ABS, self.GetBool(CHK_SCALE))
+
         if id == CHK_SCALE:
-            self.Enable(RAD_ABS, self.GetBool(CHK_SCALE))
-            self.Enable(RAD_VEC_ABS, self.GetBool(CHK_SCALE))
+            is_uv = self.GetBool(CHK_UV_PROJECTION)
+            if not is_uv:
+                self.Enable(RAD_ABS, self.GetBool(CHK_SCALE))
+                self.Enable(RAD_VEC_ABS, self.GetBool(CHK_SCALE))
 
         if id == BTN_CLOSE:
             self.Close()
             return True
             
         elif id == BTN_APPLY:
+            self.params["uv_projection"] = self.GetBool(CHK_UV_PROJECTION)
             self.params["scale"] = self.GetBool(CHK_SCALE)
             self.params["offset"] = self.GetBool(CHK_OFFSET)
             self.params["rotation"] = self.GetBool(CHK_ROTATION)

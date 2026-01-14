@@ -17,22 +17,22 @@ import redshift_utils
 PLUGIN_ID = 1067297
 
 # --- Channel Suffixes ---
-CHANNEL_SUFFIXES = {
-    "diffuse_color": "BaseColor", # RS Material
-    "base_color": "BaseColor", # Standard Material
-    "normal": "Normal",
-    "ao": "AO",
-    "refl_metalness": "Metalic", # RS Material    
-    "metalness": "Metalic", # Standard Material
-    "refl_roughness": "Roughness",
-    "refl_weight": "Specular",
-    "glossiness": "Glossiness",
-    "opacity_color": "Opacity",
-    "translucency": "Translucency",
-    "bump" : "Bump",
-    "displacement" : "Displacement",
-    "emission_color" : "Emissive"
-}
+# CHANNEL_SUFFIXES = {
+#     "diffuse_color": "BaseColor", # RS Material
+#     "base_color": "BaseColor", # Standard Material
+#     "normal": "Normal",
+#     "ao": "AO",
+#     "refl_metalness": "Metalic", # RS Material    
+#     "metalness": "Metalic", # Standard Material
+#     "refl_roughness": "Roughness",
+#     "refl_weight": "Specular",
+#     "glossiness": "Glossiness",
+#     "opacity_color": "Opacity",
+#     "translucency": "Translucency",
+#     "bump" : "Bump",
+#     "displacement" : "Displacement",
+#     "emission_color" : "Emissive"
+# }
 
 def ask_open_filenames(title="Select Files"):
     """
@@ -131,7 +131,6 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
         
         doc = c4d.documents.GetActiveDocument()
         mat = doc.GetActiveMaterial()
-
         if not mat:
             return True
 
@@ -215,14 +214,6 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                 # 연결 로직
                 tex_out = tex_node.GetOutputs().FindChild(redshift_utils.PORT_RS_TEX_OUTCOLOR)
                 
-                # Helper to set Colorspace
-                def set_colorspace_raw(node):
-                    tex0_port = node.GetInputs().FindChild(redshift_utils.PORT_RS_TEX_PATH)
-                    if tex0_port.IsValid():
-                        colorspace_port = tex0_port.FindChild("colorspace")
-                        if colorspace_port.IsValid():
-                            colorspace_port.SetPortValue(redshift_utils.RS_INPUT_COLORSPACE_RAW)
-
                 if channel == "base_color":
                     if not connected_flags["base_color"]:
                         target = standard_mat.GetInputs().FindChild(redshift_utils.PORT_RS_STD_BASE_COLOR)
@@ -232,7 +223,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             connected_flags["base_color"] = True
                 
                 if channel == "ao":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     mul_node = graph.AddChild(maxon.Id(), redshift_utils.ID_RS_MATH_VECTOR_MULTIPLY)
                     created_nodes.append(mul_node)
                     if mul_node:
@@ -241,7 +232,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             tex_out.Connect(target)
 
                 elif channel == "metalness":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     if not connected_flags["metalness"]:
                         target = standard_mat.GetInputs().FindChild(redshift_utils.PORT_RS_STD_METALNESS)
                         if target.IsValid():
@@ -250,7 +241,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             connected_flags["metalness"] = True
                 
                 elif channel == "refl_roughness":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     if not connected_flags["refl_roughness"]:
                         target = standard_mat.GetInputs().FindChild(redshift_utils.PORT_RS_STD_ROUGHNESS)
                         if target.IsValid():
@@ -259,7 +250,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             connected_flags["refl_roughness"] = True
                         
                 elif channel == "refl_weight":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     if not connected_flags["refl_weight"]:
                         target = standard_mat.GetInputs().FindChild(redshift_utils.PORT_RS_STD_SPECULAR)
                         if target.IsValid():
@@ -268,7 +259,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             connected_flags["refl_weight"] = True
                 
                 elif channel == "glossiness":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     inv_node = graph.AddChild(maxon.Id(), redshift_utils.ID_RS_MATH_INVERT)
                     created_nodes.append(inv_node)
                     if inv_node:
@@ -277,7 +268,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             tex_out.Connect(target)
 
                 elif channel == "opacity_color":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     if not connected_flags["opacity_color"]:
                         target = standard_mat.GetInputs().FindChild(redshift_utils.PORT_RS_STD_OPACITY)
                         if target.IsValid():
@@ -294,7 +285,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             connected_flags["emission_color"] = True
                         
                 elif channel == "normal":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     # Create Bump Map Node (Type 1001 for Tangent Space Normal)
                     if not connected_flags["bump_input"] or connected_flags["bump_input"] == "Bump":
                         bump_node = graph.AddChild(maxon.Id(), redshift_utils.ID_RS_BUMPMAP)
@@ -320,7 +311,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             connected_flags["bump_input"] = "Normal"
  
                 elif channel == "bump":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     # Create Bump Map Node (Type 1000 for Height Field)
                     if not connected_flags["bump_input"]:
                         bump_node = graph.AddChild(maxon.Id(), redshift_utils.ID_RS_BUMPMAP)
@@ -346,7 +337,7 @@ class CreatePBRMaterialCommand(c4d.plugins.CommandData):
                             connected_flags["bump_input"] = "Bump"
 
                 elif channel == "displacement":
-                    set_colorspace_raw(tex_node)
+                    redshift_utils.set_colorspace_raw(tex_node)
                     if not connected_flags["displacement"] and output_node:
                         disp_node = graph.AddChild(maxon.Id(), redshift_utils.ID_RS_DISPLACEMENT)
                         created_nodes.append(disp_node)

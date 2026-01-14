@@ -47,6 +47,7 @@ PORT_RS_MATH_VECTOR_MULTIPLY_INPUT2 = "com.redshift3d.redshift4c4d.nodes.core.rs
 
 PORT_RS_MATH_INVERT_INPUT = "com.redshift3d.redshift4c4d.nodes.core.rsmathinv.input"
 
+PORT_RS_UV_CONTEXT_PROJECTION_OUTCONTEXT = "com.redshift3d.redshift4c4d.nodes.core.uvcontextprojection.outcontext"
 PORT_RS_UV_CONTEXT_PROJECTION_PROJECTION = "com.redshift3d.redshift4c4d.nodes.core.uvcontextprojection.proj_type"
 # 000 Passthrough, # 001 UV Channel, # 002 Triplanar
 
@@ -206,3 +207,12 @@ def GetTextureChannel(fname):
             
     return None
 
+def set_colorspace_raw(node):
+    """
+    Sets the colorspace of a texture node to RAW.
+    """
+    tex0_port = node.GetInputs().FindChild(PORT_RS_TEX_PATH)
+    if tex0_port.IsValid():
+        colorspace_port = tex0_port.FindChild("colorspace")
+        if colorspace_port.IsValid():
+            colorspace_port.SetPortValue(RS_INPUT_COLORSPACE_RAW)
